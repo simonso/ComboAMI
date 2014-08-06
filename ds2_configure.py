@@ -124,6 +124,11 @@ def get_ec2_data():
     instance_data['internalip'] = urllib2.urlopen(req).read()
     logger.info("meta-data:local-ipv4: %s" % instance_data['internalip'])
 
+    # Find external IP address
+    req = curl_instance_data('http://169.254.169.254/latest/meta-data/public-ipv4')
+    instance_data['externalip'] = urllib2.urlopen(req).read()
+    logger.info("meta-data:external-ipv4: %s" % instance_data['externalip'])
+
     # Find public hostname
     req = curl_instance_data('http://169.254.169.254/latest/meta-data/public-hostname')
     try:
@@ -183,6 +188,11 @@ def parse_ec2_userdata():
     parser.add_argument("--release", action="store", type=str, dest="release")
     # Option that forces the rpc binding to the internal IP address of the instance
     parser.add_argument("--rpcbinding", action="store_true", dest="rpcbinding", default=False)
+
+    # Option for multi-region
+    parser.add_argument("--multiregions", action="store_true", dest="multiregions", default=False)
+    parser.add_argument("--multiregionips", action="store", dest="multiregionips")
+    parser.add_argument("--opscenteripformultiregions", action="store", dest="opscenteripformultiregions")
 
     # Option that specifies how the number of Analytics nodes
     parser.add_argument("--analyticsnodes", action="store", type=int, dest="analyticsnodes")
@@ -270,6 +280,12 @@ def use_ec2_userdata():
 
     if options.customreservation:
         instance_data['reservationid'] = options.customreservation
+
+    if options.multiregionips:
+        instance_data['multiregionips'] = options.multiregionips
+
+    if options.opscenteripformultiregions:
+        instance_data['opscenteripformultiregions'] = options.opscenteripformultiregions
 
     options.realtimenodes = (options.totalnodes - options.analyticsnodes - options.searchnodes)
     options.seed_indexes = [0, options.realtimenodes, options.realtimenodes + options.analyticsnodes]
@@ -500,7 +516,10 @@ def checkpoint_info():
         conf.set_config("OpsCenter", "DNS", instance_data['publichostname'])
     else:
         logger.info("Seed list: {0}".format(config_data['seed_list']))
-        logger.info("OpsCenter: {0}".format(config_data['opscenterseed']))
+        if options.opscenteripformultiregions:
+            logger.info("OpsCenter: {0}".format(options.opscenteripformultiregions))
+        else:
+            logger.info("OpsCenter: {0}".format(config_data['opscenterseed']))
         logger.info("Options: {0}".format(options))
         conf.set_config("AMI", "LeadingSeed", config_data['opscenterseed'])
     conf.set_config("AMI", "CurrentStatus", "Installation complete")
@@ -519,6 +538,9 @@ def construct_yaml():
     # Create the seed list
     seeds_yaml = ','.join(config_data['seed_list'])
 
+    if options.multiregionips:
+        seeds_yaml = seeds_yaml + ',' + options.multiregionips
+
     # Set seeds for DSE/C
     p = re.compile('seeds:.*')
     yaml = p.sub('seeds: "{0}"'.format(seeds_yaml), yaml)
@@ -533,6 +555,12 @@ def construct_yaml():
         yaml = p.sub('rpc_address: {0}'.format(instance_data['internalip']), yaml)
     else:
         yaml = p.sub('rpc_address: 0.0.0.0', yaml)
+
+    if options.multiregions or options.multiregionips:
+        yaml = yaml.replace('endpoint_snitch: org.apache.cassandra.locator.SimpleSnitch', 'endpoint_snitch: org.apache.cassandra.locator.Ec2MultiRegionSnitch')
+        yaml = yaml.replace('endpoint_snitch: SimpleSnitch', 'endpoint_snitch: Ec2MultiRegionSnitch')
+        p = re.compile('# broadcast_address: 1.2.3.4')
+        yaml = p.sub('broadcast_address: {0}'.format(instance_data['externalip']), yaml)
 
     # Uses the EC2Snitch for Community Editions
     if conf.get_config("AMI", "Type") == "Community":
@@ -639,7 +667,10 @@ password =
 """
 
         # Configure OpsCenter Cluster
-        opsc_cluster_conf = opsc_cluster_conf.format(config_data['opscenterseed'])
+        if options.opscenteripformultiregions:
+            opsc_cluster_conf = opsc_cluster_conf.format(options.opscenteripformultiregions)
+        else:
+            opsc_cluster_conf = opsc_cluster_conf.format(config_data['opscenterseed'])
 
         with open(os.path.join(opsc_cluster_path, cluster_conf), 'w') as f:
             f.write(opsc_cluster_conf)
@@ -723,7 +754,11 @@ def construct_agent():
     logger.exe('sudo chown ubuntu:ubuntu /var/lib/datastax-agent/conf')
 
     with open('/var/lib/datastax-agent/conf/address.yaml', 'w') as f:
-        f.write('stomp_interface: %s\n' % config_data['opscenterseed'])
+        if options.opscenteripformultiregions:
+            f.write('stomp_interface: %s\n' % options.opscenteripformultiregions)
+        else:
+            f.write('stomp_interface: %s\n' % config_data['opscenterseed'])
+
         if options.opscenterssl:
             f.write('use_ssl: 1')
 
