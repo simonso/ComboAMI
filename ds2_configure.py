@@ -1005,7 +1005,7 @@ def additional_pre_configurations():
     # Get required keys for Ubuntu
     logger.exe('sudo apt-key add /home/ubuntu/datastax_ami/repo_keys/Launchpad_VLC.C2518248EEA14886.key')
     logger.exe('sudo apt-key add /home/ubuntu/datastax_ami/repo_keys/Ubuntu_Archive.40976EAF437D05B5.key')
-
+    logger.exe('sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 3B4FE6ACC0B21F32')
 
 def additional_post_configurations():
     if options.base64postscript:
