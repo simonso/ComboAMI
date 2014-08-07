@@ -201,7 +201,7 @@ def parse_ec2_userdata():
     # Option that forces Hadoop analytics nodes over Spark analytics nodes
     parser.add_argument("--hadoop", action="store_true", dest="hadoop")
 
-    # Option that specifies the CassandraFS replication factor
+    # Option that specifies the CassandraFS replication factor1
     parser.add_argument("--cfsreplicationfactor", action="store", type=int, dest="cfsreplication")
 
     # Option that specifies the username
@@ -281,13 +281,14 @@ def use_ec2_userdata():
     if options.customreservation:
         instance_data['reservationid'] = options.customreservation
 
-    if options.multiregion:
-        if options.seeds:
+    if options.seeds:
+        if options.multiregion:
             instance_data['seeds'] = options.seeds
         else:
             logger.warn("Ignoring seeds values because multiregion is not set to be true.")
 
-        if options.opscenterip:
+    if options.opscenterip:
+        if options.multiregion:
             instance_data['opscenterip'] = options.opscenterip
         else:
             logger.warn("Ignoring opscenterip values because multiregion is not set to be true.")
@@ -562,6 +563,8 @@ def construct_yaml():
         yaml = p.sub('rpc_address: 0.0.0.0', yaml)
 
     if options.multiregion:
+        # multiregion: --rpcbinding is implicitly true
+        yaml = p.sub('rpc_address: {0}'.format(instance_data['internalip']), yaml)
         yaml = yaml.replace('endpoint_snitch: org.apache.cassandra.locator.SimpleSnitch', 'endpoint_snitch: org.apache.cassandra.locator.Ec2MultiRegionSnitch')
         yaml = yaml.replace('endpoint_snitch: SimpleSnitch', 'endpoint_snitch: Ec2MultiRegionSnitch')
         p = re.compile('# broadcast_address: 1.2.3.4')
