@@ -124,11 +124,6 @@ def get_ec2_data():
     instance_data['internalip'] = urllib2.urlopen(req).read()
     logger.info("meta-data:local-ipv4: %s" % instance_data['internalip'])
 
-    # Find external IP address
-    req = curl_instance_data('http://169.254.169.254/latest/meta-data/public-ipv4')
-    instance_data['externalip'] = urllib2.urlopen(req).read()
-    logger.info("meta-data:external-ipv4: %s" % instance_data['externalip'])
-
     # Find public hostname
     req = curl_instance_data('http://169.254.169.254/latest/meta-data/public-hostname')
     try:
@@ -201,7 +196,7 @@ def parse_ec2_userdata():
     # Option that forces Hadoop analytics nodes over Spark analytics nodes
     parser.add_argument("--hadoop", action="store_true", dest="hadoop")
 
-    # Option that specifies the CassandraFS replication factor1
+    # Option that specifies the CassandraFS replication factor
     parser.add_argument("--cfsreplicationfactor", action="store", type=int, dest="cfsreplication")
 
     # Option that specifies the username
@@ -282,16 +277,10 @@ def use_ec2_userdata():
         instance_data['reservationid'] = options.customreservation
 
     if options.seeds:
-        if options.multiregion:
-            instance_data['seeds'] = options.seeds
-        else:
-            logger.warn("Ignoring seeds values because multiregion is not set to be true.")
+        instance_data['seeds'] = options.seeds
 
     if options.opscenterip:
-        if options.multiregion:
-            instance_data['opscenterip'] = options.opscenterip
-        else:
-            logger.warn("Ignoring opscenterip values because multiregion is not set to be true.")
+        instance_data['opscenterip'] = options.opscenterip
 
     options.realtimenodes = (options.totalnodes - options.analyticsnodes - options.searchnodes)
     options.seed_indexes = [0, options.realtimenodes, options.realtimenodes + options.analyticsnodes]
@@ -522,7 +511,7 @@ def checkpoint_info():
         conf.set_config("OpsCenter", "DNS", instance_data['publichostname'])
     else:
         logger.info("Seed list: {0}".format(config_data['seed_list']))
-        if options.multiregion and options.seeds:
+        if options.seeds:
             logger.info("OpsCenter: {0}".format(options.seeds))
         else:
             logger.info("OpsCenter: {0}".format(config_data['opscenterseed']))
@@ -544,7 +533,7 @@ def construct_yaml():
     # Create the seed list
     seeds_yaml = ','.join(config_data['seed_list'])
 
-    if options.multiregion and options.seeds:
+    if options.seeds:
         seeds_yaml = seeds_yaml + ',' + options.seeds
 
     # Set seeds for DSE/C
@@ -568,6 +557,9 @@ def construct_yaml():
         yaml = yaml.replace('endpoint_snitch: org.apache.cassandra.locator.SimpleSnitch', 'endpoint_snitch: org.apache.cassandra.locator.Ec2MultiRegionSnitch')
         yaml = yaml.replace('endpoint_snitch: SimpleSnitch', 'endpoint_snitch: Ec2MultiRegionSnitch')
         p = re.compile('# broadcast_address: 1.2.3.4')
+        req = curl_instance_data('http://169.254.169.254/latest/meta-data/public-ipv4')
+        instance_data['externalip'] = urllib2.urlopen(req).read()
+        logger.info("meta-data:external-ipv4: %s" % instance_data['externalip'])
         yaml = p.sub('broadcast_address: {0}'.format(instance_data['externalip']), yaml)
 
     # Uses the EC2Snitch for Community Editions
@@ -675,7 +667,7 @@ password =
 """
 
         # Configure OpsCenter Cluster
-        if options.multiregion and options.opscenterip:
+        if options.opscenterip:
             opsc_cluster_conf = opsc_cluster_conf.format(options.opscenterip)
         else:
             opsc_cluster_conf = opsc_cluster_conf.format(config_data['opscenterseed'])
@@ -762,7 +754,7 @@ def construct_agent():
     logger.exe('sudo chown ubuntu:ubuntu /var/lib/datastax-agent/conf')
 
     with open('/var/lib/datastax-agent/conf/address.yaml', 'w') as f:
-        if options.multiregion and options.opscenterip:
+        if options.opscenterip:
             f.write('stomp_interface: %s\n' % options.opscenterip)
         else:
             f.write('stomp_interface: %s\n' % config_data['opscenterseed'])
